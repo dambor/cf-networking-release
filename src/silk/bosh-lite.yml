@@ -1,0 +1,57 @@
+---
+name: silk
+
+# replace with bosh status --uuid
+director_uuid: <%= `bosh target lite > /dev/null 2>&1 && bosh status --uuid` %>
+
+releases:
+  - name: netman
+    version: latest
+  - name: garden-runc
+    version: latest
+  - name: etcd
+    version: latest
+
+stemcells:
+- alias: trusty
+  os: ubuntu-trusty
+  version: latest
+
+instance_groups:
+- name: garden
+  instances: 2
+  azs: [z1]
+  vm_type: basic
+  stemcell: trusty
+  networks: [{name: shared}]
+  jobs:
+  - name: garden
+    release: garden-runc
+  - name: garden-cni
+    release: netman
+  - name: cni-flannel
+    release: netman
+  - name: etcd
+    release: etcd
+
+update:
+  canaries: 1
+  max_in_flight: 1
+  serial: false
+  canary_watch_time: 1000-60000
+  update_watch_time: 1000-60000
+
+properties:
+  etcd:
+    require_ssl: false
+    peer_require_ssl: false
+    machines: [ 127.0.0.1 ]
+  garden:
+    listen_network: tcp
+    listen_address: 0.0.0.0:7777
+    network_plugin: /var/vcap/packages/runc-cni/bin/garden-external-networker
+    network_plugin_extra_args:
+    - --configFile=/var/vcap/jobs/garden-cni/config/adapter.json
+  garden-cni:
+    cni_plugin_dir: /var/vcap/packages/flannel/bin
+    cni_config_dir: /var/vcap/jobs/cni-flannel/config/cni
