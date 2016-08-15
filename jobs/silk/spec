@@ -1,0 +1,36 @@
+---
+name: silk
+
+templates:
+  silk_ctl.erb: bin/silk_ctl
+  silk.json.erb: config/silk.json
+  00-silk.conf.erb: config/cni/00-silk.conf
+
+consumes:
+- name: peers
+  type: silk_peers
+
+provides:
+- name: peers
+  type: silk_peers
+
+packages:
+  - silk
+  - runc-cni
+
+properties:
+  silk.network:
+    description: "CIDR block for overlay network.  Should be /16"
+    default: "10.255.0.0/16"
+
+  silk.vni:
+    description: "VXLAN Virtual Network Identifier to use"
+    default: 1
+
+  silk.port:
+    description: "UDP port to use for VXLAN Tunnel Endpoints"
+    default: 8472
+
+  silk.flannel_subnet_file:
+    description: "Path to the flannel subnet file"
+    default: /run/flannel/subnet.env

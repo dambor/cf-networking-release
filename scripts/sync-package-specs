@@ -65,6 +65,12 @@ GOOS=linux sync_package flannel \
   -app github.com/containernetworking/cni/plugins/meta/flannel \
   -app cni-wrapper-plugin &
 
+GOOS=linux sync_package silk \
+  -app silk \
+  -app github.com/containernetworking/cni/plugins/main/bridge \
+  -app github.com/containernetworking/cni/plugins/ipam/host-local \
+  -app github.com/containernetworking/cni/plugins/meta/flannel &
+
 wait
 
 git diff --name-only packages/*/spec

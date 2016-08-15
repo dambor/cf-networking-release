@@ -1,0 +1,25 @@
+{
+  "network": "10.255.0.0/16",
+  "vni": 1,
+  "port": 8472,
+  "flannel_subnet_file": "/run/flannel/subnet.env",
+  "this_index": 5,
+  "hosts": [
+    {
+      "index": 0,
+      "public_ip": "10.244.99.10"
+    },
+    {
+      "index": 1,
+      "public_ip": "10.244.99.11"
+    },
+    {
+      "index": 5,
+      "public_ip": "10.244.99.15"
+    },
+    {
+      "index": 8,
+      "public_ip": "10.244.99.18"
+    }
+  ]
+}

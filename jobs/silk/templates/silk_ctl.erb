@@ -1,0 +1,59 @@
+#!/bin/bash
+
+set -e -u
+
+RUN_DIR=/var/vcap/sys/run/silk
+LOG_DIR=/var/vcap/sys/log/silk
+PIDFILE=$RUN_DIR/silk.pid
+
+mkdir -p /var/vcap/sys/log/monit
+exec 1>> /var/vcap/sys/log/monit/silk.out.log
+exec 2>> /var/vcap/sys/log/monit/silk.err.log
+
+case $1 in
+
+  start)
+    mkdir -p $RUN_DIR
+    mkdir -p $LOG_DIR
+
+    echo $$ > $PIDFILE
+
+    exec /var/vcap/packages/silk/bin/silk \
+      --config-file /var/vcap/jobs/silk/config/silk.json \
+      2> >(tee -a $LOG_DIR/silk.stderr.log | logger -p user.error -t silk) \
+      1> >(tee -a $LOG_DIR/silk.stdout.log | logger -t silk)
+
+    ;;
+
+  stop)
+
+    pid=$(cat $PIDFILE)
+
+    for i in $(seq 30); do
+      echo "sending INT to ${pid}..."
+      if kill -INT $pid; then
+        sleep 1
+      else
+        echo "exited"
+        exit 0
+      fi
+    done
+
+    echo "timed out; sending SIGQUIT followed by SIGKILL to ${pid}..."
+    if kill -QUIT $pid; then
+      sleep 5
+
+      echo "killing ${pid}..."
+      kill -9 $pid
+    fi
+
+    echo "killed"
+
+    ;;
+
+  *)
+    echo "Usage: $0 {start|stop}"
+
+    ;;
+
+esac

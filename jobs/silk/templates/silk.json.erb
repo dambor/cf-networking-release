@@ -1,0 +1,23 @@
+<%=
+
+require 'json'
+
+def get_hosts()
+  hosts = []
+  link("peers").instances.map do |instance|
+    hosts.push({
+      "index" => instance.index,
+      "public_ip" => instance.address,
+    })
+  end
+  hosts
+end
+
+
+conf = p("silk")
+conf["this_index"] = spec.index
+conf["hosts"] = get_hosts()
+
+JSON.pretty_generate(conf)
+
+%>

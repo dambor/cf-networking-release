@@ -9,8 +9,6 @@ releases:
     version: latest
   - name: garden-runc
     version: latest
-  - name: etcd
-    version: latest
 
 stemcells:
 - alias: trusty
@@ -29,10 +27,8 @@ instance_groups:
     release: garden-runc
   - name: garden-cni
     release: netman
-  - name: cni-flannel
+  - name: silk
     release: netman
-  - name: etcd
-    release: etcd
 
 update:
   canaries: 1
@@ -42,10 +38,6 @@ update:
   update_watch_time: 1000-60000
 
 properties:
-  etcd:
-    require_ssl: false
-    peer_require_ssl: false
-    machines: [ 127.0.0.1 ]
   garden:
     listen_network: tcp
     listen_address: 0.0.0.0:7777
@@ -53,5 +45,5 @@ properties:
     network_plugin_extra_args:
     - --configFile=/var/vcap/jobs/garden-cni/config/adapter.json
   garden-cni:
-    cni_plugin_dir: /var/vcap/packages/flannel/bin
-    cni_config_dir: /var/vcap/jobs/cni-flannel/config/cni
+    cni_plugin_dir: /var/vcap/packages/silk/bin
+    cni_config_dir: /var/vcap/jobs/silk/config/cni

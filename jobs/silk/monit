@@ -1,0 +1,5 @@
+check process silk
+  with pidfile /var/vcap/sys/run/silk/silk.pid
+  start program "/var/vcap/jobs/silk/bin/silk_ctl start"
+  stop program "/var/vcap/jobs/silk/bin/silk_ctl stop"
+  group vcap
