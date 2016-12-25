@@ -5,10 +5,10 @@ name: silk
 director_uuid: <%= `bosh target lite > /dev/null 2>&1 && bosh status --uuid` %>
 
 releases:
-  - name: netman
-    version: latest
-  - name: garden-runc
-    version: latest
+- name: netman
+  version: latest
+- name: garden-runc
+  version: latest
 
 stemcells:
 - alias: trusty
@@ -21,7 +21,8 @@ instance_groups:
   azs: [z1]
   vm_type: basic
   stemcell: trusty
-  networks: [{name: shared}]
+  networks:
+  - name: shared
   jobs:
   - name: garden
     release: garden-runc
@@ -30,9 +31,22 @@ instance_groups:
   - name: silk
     release: netman
 
+- name: silk-controller
+  instances: 1
+  azs: [z1]
+  vm_type: basic
+  stemcell: trusty
+  networks:
+  - name: shared
+    static_ips:
+      - 10.244.99.9
+  jobs:
+  - name: silk-controller
+    release: netman
+
 update:
   canaries: 1
-  max_in_flight: 1
+  max_in_flight: 5
   serial: false
   canary_watch_time: 1000-60000
   update_watch_time: 1000-60000

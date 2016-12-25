@@ -6,8 +6,10 @@ import (
 	"lib/flannel"
 	"net"
 	"os"
+	"silk-controller/client"
 	"silk/backend"
 	"silk/config"
+	"silk/converge"
 
 	"code.cloudfoundry.org/lager"
 	"github.com/tedsuo/ifrit"
@@ -27,9 +29,7 @@ func main() {
 
 func mainWithError(logger lager.Logger) error {
 	var configFilePath string
-	var runOnce bool
 	flag.StringVar(&configFilePath, "config-file", "", "path to config file")
-	flag.BoolVar(&runOnce, "run-once", false, "run once and then quit.")
 	flag.Parse()
 
 	rawConfig, err := config.ReadFile(configFilePath)
@@ -44,53 +44,21 @@ func mainWithError(logger lager.Logger) error {
 	}
 	logger.Info("parsed-config", lager.Data{"config": parsedConfig})
 
-	controller, err := backend.New(
-		parsedConfig.VNI,
-		parsedConfig.Port,
-		parsedConfig.ThisHost,
-		parsedConfig.FullNetwork,
-	)
-	if err != nil {
-		return fmt.Errorf("initializing vxlan controller: %s", err)
-	}
-	logger.Info("initialized-vxlan-controller", lager.Data{"controller": controller})
-
-	flannelSubnetFileContents := &flannel.SubnetFileInfo{
-		FullNetwork: parsedConfig.FullNetwork,
-		MTU:         controller.OverlayMTU(),
-		IPMasq:      false,
-		Subnet:      getFirstAllocatableAddress(parsedConfig.ThisHost.OverlaySubnet),
-	}
-	err = flannelSubnetFileContents.WriteFile(rawConfig.FlannelSubnetFilePath)
-	if err != nil {
-		return fmt.Errorf("writing flannel file: %s", err)
-	}
-	logger.Info("wrote-flannel-subnet-file")
-
-	err = controller.ConfigureDevice()
-	if err != nil {
-		return fmt.Errorf("configuring vxlan device: %s", err)
-	}
-	logger.Info("configured vxlan device")
-
-	err = controller.InstallRoutes(parsedConfig.RemoteHosts)
-	if err != nil {
-		return fmt.Errorf("installing routes: %s", err)
-	}
-	logger.Info("installed routes")
-
-	if runOnce {
-		return nil
+	convergePoller := &converge.Poller{
+		Logger:           logger.Session("poller"),
+		PollInterval:     parsedConfig.PollInterval,
+		ControllerClient: client.New(logger, parsedConfig.ControllerBaseURL, parsedConfig.VtepIP.String()),
+		FlannelFileWriter: &flannelFileWriter{
+			FilePath: rawConfig.FlannelSubnetFilePath,
+		},
+		VtepFactory: &backend.VtepFactory{
+			Port:        parsedConfig.VtepPort,
+			VNI:         parsedConfig.VNI,
+			FullNetwork: parsedConfig.FullNetwork,
+		},
 	}
 
-	upkeep := ifrit.RunFunc(func(sigChan <-chan os.Signal, ready chan<- struct{}) error {
-		close(ready)
-
-		<-sigChan
-
-		return nil
-	})
-	members := grouper.Members{{"silk-upkeep", upkeep}}
+	members := grouper.Members{{"silk-upkeep", convergePoller}}
 
 	monitor := ifrit.Invoke(sigmon.New(grouper.NewOrdered(os.Interrupt, members)))
 	logger.Info("starting")
@@ -100,6 +68,20 @@ func mainWithError(logger lager.Logger) error {
 	}
 
 	return nil
+}
+
+type flannelFileWriter struct {
+	FilePath string
+}
+
+func (f *flannelFileWriter) Write(fullNet, localNet net.IPNet, mtu int) error {
+	flannelSubnetFileContents := &flannel.SubnetFileInfo{
+		FullNetwork: fullNet,
+		Subnet:      getFirstAllocatableAddress(localNet),
+		MTU:         mtu,
+		IPMasq:      false,
+	}
+	return flannelSubnetFileContents.WriteFile(f.FilePath)
 }
 
 func getFirstAllocatableAddress(subnet net.IPNet) net.IPNet {

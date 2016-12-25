@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
-	"silk/hwaddr"
-	"silk/models"
 	"silk/subnet"
+	"time"
 )
 
 func ReadFile(configFilePath string) (*Silk, error) {
@@ -30,67 +29,57 @@ func ReadFile(configFilePath string) (*Silk, error) {
 }
 
 type Silk struct {
-	Hosts []struct {
-		Index    int    `json:"index"`
-		PublicIP string `json:"public_ip"`
-	} `json:"hosts"`
-	ThisIndex             int    `json:"this_index"`
 	VNI                   int    `json:"vni"`
-	Port                  int    `json:"port"`
+	VtepPort              int    `json:"vtep_port"`
+	VtepIP                string `json:"vtep_ip"`
+	PollInterval          int    `json:"poll_interval"`
 	Network               string `json:"network"`
 	FlannelSubnetFilePath string `json:"flannel_subnet_file"`
+	Controller            struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	}
 }
 
 type Parsed struct {
-	VNI         int
-	Port        int
-	FullNetwork net.IPNet
-	RemoteHosts []*models.NetHost
-	ThisHost    *models.NetHost
-}
-
-func parseHost(publicIP string, partition subnet.Partition, hostIndex int) (*models.NetHost, error) {
-	host := &models.NetHost{}
-	host.PublicIP = net.ParseIP(publicIP)
-	if host.PublicIP == nil {
-		return nil, fmt.Errorf("error parsing %q as an IP")
-	}
-	var err error
-	host.OverlaySubnet, err = partition.IndexToSubnet(hostIndex)
-	if err != nil {
-		return nil, fmt.Errorf("partition subnet: %s", err)
-	}
-	host.VtepOverlayIP = host.OverlaySubnet.IP
-	host.VtepOverlayMAC = hwaddr.MACAddressFromIP(host.VtepOverlayIP)
-	return host, nil
+	VNI               int
+	VtepPort          int
+	VtepIP            net.IP
+	FullNetwork       net.IPNet
+	ControllerBaseURL string
+	PollInterval      time.Duration
 }
 
 func Parse(conf *Silk) (*Parsed, error) {
 	parsed := &Parsed{
-		VNI:  conf.VNI,
-		Port: conf.Port,
+		VNI:      conf.VNI,
+		VtepPort: conf.VtepPort,
+		VtepIP:   net.ParseIP(conf.VtepIP),
 	}
 	if conf.VNI < 0 || conf.VNI >= (1<<24) {
 		return nil, fmt.Errorf("VNI must be between 0 and 2^24-1")
 	}
-	if conf.Port <= 0 || conf.Port >= (1<<16) {
-		return nil, fmt.Errorf("Port must be between 0 and 2^16-1")
+	if conf.VtepPort <= 0 || conf.VtepPort >= (1<<16) {
+		return nil, fmt.Errorf("VtepPort must be between 0 and 2^16-1")
 	}
+	if parsed.VtepIP == nil {
+		return nil, fmt.Errorf("failed parsing VtepIP")
+	}
+
+	if conf.Controller.Host == "" || conf.Controller.Port == 0 {
+		return nil, fmt.Errorf("controller host and port are required")
+	}
+	parsed.ControllerBaseURL = fmt.Sprintf("http://%s:%d", conf.Controller.Host, conf.Controller.Port)
+
+	if conf.PollInterval < 1 {
+		return nil, fmt.Errorf("controller poll interval must be at least 1 second")
+	}
+	parsed.PollInterval = time.Duration(conf.PollInterval) * time.Second
+
 	partition, err := subnet.NewPartition(conf.Network)
 	if err != nil {
 		return nil, fmt.Errorf("partitioning subnets: %s", err)
 	}
 	parsed.FullNetwork = partition.FullNetwork()
-	for _, confHost := range conf.Hosts {
-		parsedHost, err := parseHost(confHost.PublicIP, partition, confHost.Index)
-		if err != nil {
-			return nil, fmt.Errorf("parsing host: %s", err)
-		}
-		if confHost.Index == conf.ThisIndex {
-			parsed.ThisHost = parsedHost
-		} else {
-			parsed.RemoteHosts = append(parsed.RemoteHosts, parsedHost)
-		}
-	}
 	return parsed, nil
 }

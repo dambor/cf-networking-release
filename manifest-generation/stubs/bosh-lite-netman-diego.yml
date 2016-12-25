@@ -6,7 +6,7 @@ netman_overrides:
   driver_templates:
   - name: garden-cni
     release: netman
-  - name: cni-flannel
+  - name: silk
     release: netman
   - name: netmon
     release: netman
@@ -102,17 +102,8 @@ netman_overrides:
         46EI+Z6nPAkL1rFOtbJK5MtcCy0kfraAKEuTJcKmy5H0dLTsdVv7pA==
         -----END RSA PRIVATE KEY-----
     garden-cni:
-      cni_plugin_dir: /var/vcap/packages/flannel/bin
-      cni_config_dir: /var/vcap/jobs/cni-flannel/config/cni
-    cni-flannel:
-      etcd_endpoints:
-        - (( config_from_cf.etcd.advertise_urls_dns_suffix ))
-      etcd_client_cert: (( config_from_cf.etcd.client_cert ))
-      etcd_client_key: (( config_from_cf.etcd.client_key ))
-      etcd_ca_cert: (( config_from_cf.etcd.ca_cert ))
-      flannel:
-        etcd:
-          require_ssl: (( config_from_cf.etcd.require_ssl))
+      cni_plugin_dir: /var/vcap/packages/silk/bin
+      cni_config_dir: /var/vcap/jobs/silk/config/cni
     policy-server:
       database:
         username: networkpolicyadmin
@@ -219,6 +210,8 @@ netman_overrides:
     persistent_disk: 256
     templates:
     - name: policy-server
+      release: netman
+    - name: silk-controller
       release: netman
     - name: route_registrar
       release: cf

@@ -7,30 +7,34 @@ templates:
   00-silk.conf.erb: config/cni/00-silk.conf
 
 consumes:
-- name: peers
-  type: silk_peers
-
-provides:
-- name: peers
-  type: silk_peers
+- name: silk-controller
+  type: silk-controller
 
 packages:
-  - silk
-  - runc-cni
+- silk
+- runc-cni
 
 properties:
-  silk.network:
-    description: "CIDR block for overlay network.  Should be /16"
-    default: "10.255.0.0/16"
-
-  silk.vni:
-    description: "VXLAN Virtual Network Identifier to use"
-    default: 1
-
-  silk.port:
+  vtep_port:
     description: "UDP port to use for VXLAN Tunnel Endpoints"
     default: 8472
 
-  silk.flannel_subnet_file:
+  flannel_subnet_file:
     description: "Path to the flannel subnet file"
-    default: /run/flannel/subnet.env
+    default: "/var/vcap/data/flannel/subnet.env"
+
+  poll_interval:
+    description: "Interval for polling silk-controller, in seconds"
+    default: 15
+
+  cni_datastore_path:
+    description: "File where the wrapper plugin will store container info"
+    default: "/var/vcap/data/container-metadata/store.json"
+
+  cni_iptables_lock_file:
+    description: "File that will be used to synchronize access to iptables"
+    default: /var/vcap/data/garden-cni/iptables.lock
+
+  flannel_data_dir:
+    description: "Directory that flannel uses for storing internal CNI plugin data"
+    default: /var/vcap/data/flannel/data

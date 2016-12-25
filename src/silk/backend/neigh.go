@@ -8,41 +8,34 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-type L2Neigh struct {
-	OverlayMAC net.HardwareAddr
-	UnderlayIP net.IP
-}
-
-func (dev *vxlanDevice) SetL2(n L2Neigh) error {
+// UpsertFDB upserts a forwarding database rule for the vxlan vtep
+// The rule is of the form: overlayHardwareAddr --> targetVtepIP
+func (dev *vxlanDevice) UpsertFDB(overlayHardwareAddr net.HardwareAddr, targetVtepIP net.IP) error {
 	// bridge fdb replace 0a:00:0a:ff:02:00 dev silk.1 dst 10.244.99.11
-	fmt.Printf("calling L2 NeighSet: %s to %s", n.OverlayMAC.String(), n.UnderlayIP.String())
 	return netlink.NeighSet(&netlink.Neigh{
 		LinkIndex:    dev.link.Index,
 		State:        netlink.NUD_PERMANENT,
 		Family:       syscall.AF_BRIDGE,
 		Flags:        netlink.NTF_SELF,
-		IP:           n.UnderlayIP,
-		HardwareAddr: n.OverlayMAC,
+		IP:           targetVtepIP,
+		HardwareAddr: overlayHardwareAddr,
 	})
 }
 
-type L3Neigh struct {
-	OverlayMAC net.HardwareAddr
-	OverlayIP  net.IP
-}
-
-func (dev *vxlanDevice) SetL3(n L3Neigh) error {
+// UpsertARP upserts a neighbor rule to the ARP table
+// The rule is of the form: overlay IP --> overlayHardwareAddr
+func (dev *vxlanDevice) UpsertARP(overlayIP net.IP, overlayHardwareAddr net.HardwareAddr) error {
 	// ip neigh replace to 10.255.1.0 dev silk.1 lladdr 0a:00:0a:ff:01:00
-	fmt.Printf("calling L3 NeighSet: %s to %s", n.OverlayIP.String(), n.OverlayMAC.String())
 	return netlink.NeighSet(&netlink.Neigh{
 		LinkIndex:    dev.link.Index,
 		State:        netlink.NUD_PERMANENT,
 		Type:         syscall.RTN_UNICAST,
-		IP:           n.OverlayIP,
-		HardwareAddr: n.OverlayMAC,
+		IP:           overlayIP,
+		HardwareAddr: overlayHardwareAddr,
 	})
 }
 
+// AddRoute installs an IP route that targets the device
 func (dev *vxlanDevice) AddRoute(destNet *net.IPNet, gateway net.IP, scope netlink.Scope, src net.IP) error {
 	// ip route add 10.255.2.0/24 via 10.255.2.0 dev silk.1
 	err := netlink.RouteAdd(&netlink.Route{
@@ -59,6 +52,7 @@ func (dev *vxlanDevice) AddRoute(destNet *net.IPNet, gateway net.IP, scope netli
 	return nil
 }
 
+// PurgeAllRoutes deletes all IP routes targetting the device
 func (dev *vxlanDevice) PurgeAllRoutes() error {
 	existingRoutes, err := netlink.RouteList(dev.link, syscall.AF_INET)
 	if err != nil {
@@ -74,6 +68,7 @@ func (dev *vxlanDevice) PurgeAllRoutes() error {
 	return nil
 }
 
+// PurgeAllAddresses deletes all IP addresses for the device
 func (dev *vxlanDevice) PurgeAllAddresses() error {
 	addrs, err := netlink.AddrList(dev.link, syscall.AF_INET)
 	if err != nil {

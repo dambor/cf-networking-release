@@ -3,92 +3,124 @@ package backend
 import (
 	"fmt"
 	"net"
-	"silk/models"
+	"silk-controller/models"
 
 	"github.com/vishvananda/netlink"
+
+	multierror "github.com/hashicorp/go-multierror"
 )
 
-type Controller interface {
-	OverlayMTU() int
-	ConfigureDevice() error
-	InstallRoutes(remoteHosts []*models.NetHost) error
+type VtepFactory struct {
+	VNI         int
+	Port        int
+	FullNetwork net.IPNet
 }
 
-type controller struct {
-	ExternalInterface net.Interface
-	Device            *vxlanDevice
-	LocalConfig       *models.NetHost
-	FullOverlay       net.IPNet
-	devAttrs          *vxlanDeviceAttrs
-}
-
-func (c *controller) OverlayMTU() int {
-	return c.ExternalInterface.MTU - 48
-}
-
-func New(vni int, port int, localConfig *models.NetHost, fullOverlay net.IPNet) (Controller, error) {
-	externalIP := localConfig.PublicIP
-	externalInterface, err := locateInterface(externalIP)
+func (f *VtepFactory) NewVtep(localConfig models.Route) (Vtep, error) {
+	conf, err := netHostFromControllerRoute(localConfig)
 	if err != nil {
-		return nil, fmt.Errorf("locating external interface: %s", err)
+		return nil, err
+	}
+	return f.newVtep(conf)
+}
+
+func (f *VtepFactory) newVtep(localConfig *NetHost) (Vtep, error) {
+	vtepName := fmt.Sprintf("%s.%d", "flannel", f.VNI)
+	bridgeName := fmt.Sprintf("cni-%s0", "flannel")
+	cont := &vtep{
+		dependentLinks:     []string{vtepName, bridgeName},
+		localVtepOverlayIP: localConfig.VtepOverlayIP,
+		fullNetwork:        f.FullNetwork,
+		localSubnet:        localConfig.OverlaySubnet,
 	}
 
-	cont := &controller{
-		ExternalInterface: externalInterface,
-		LocalConfig:       localConfig,
-		FullOverlay:       fullOverlay,
-		devAttrs: &vxlanDeviceAttrs{
-			vni:       vni,
-			name:      fmt.Sprintf("silk.%v", vni),
-			vtepIndex: externalInterface.Index,
-			vtepAddr:  externalIP,
-			vtepPort:  port,
-		},
+	err := cont.deleteDependentLinks()
+	if err != nil {
+		return nil, fmt.Errorf("cleanup links: %s", err)
+	}
+
+	cont.device, err = newVXLANDevice(vtepName, f.VNI, localConfig.PublicIP, f.Port)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cont.device.Configure(
+		localConfig.VtepOverlayIP,
+		f.FullNetwork.Mask,
+		localConfig.VtepOverlayMAC); err != nil {
+		return nil, fmt.Errorf("configuring vxlan device: %s", err)
 	}
 
 	return cont, nil
 }
 
-func (c *controller) ConfigureDevice() error {
-	dev, err := newVXLANDevice(c.devAttrs)
+type Vtep interface {
+	OverlayMTU() int
+	InstallRoutes(remoteHosts []models.Route) error
+	Teardown() error
+	FullNetwork() net.IPNet
+	LocalSubnet() net.IPNet
+}
+
+type vtep struct {
+	device             *vxlanDevice
+	dependentLinks     []string
+	localVtepOverlayIP net.IP
+	fullNetwork        net.IPNet
+	localSubnet        net.IPNet
+}
+
+func (c *vtep) InstallRoutes(remoteHosts []models.Route) error {
+	hosts, err := netHostsFromControllerRoutes(remoteHosts)
 	if err != nil {
 		return err
 	}
-	c.Device = dev
-
-	if err := c.Device.Configure(
-		c.LocalConfig.VtepOverlayIP,
-		c.FullOverlay.Mask,
-		c.LocalConfig.VtepOverlayMAC); err != nil {
-		return fmt.Errorf("configuring vxlan device: %s", err)
-	}
-
-	return nil
+	return c.installRoutes(hosts)
 }
 
-func (c *controller) InstallRoutes(remoteHosts []*models.NetHost) error {
+func (c *vtep) installRoutes(remoteHosts []*NetHost) error {
 	for _, host := range remoteHosts {
-		l3neigh := L3Neigh{
-			OverlayIP:  host.VtepOverlayIP,
-			OverlayMAC: host.VtepOverlayMAC,
-		}
-		l2neigh := L2Neigh{
-			OverlayMAC: host.VtepOverlayMAC,
-			UnderlayIP: host.PublicIP,
-		}
-		err := c.Device.SetL3(l3neigh)
+		err := c.device.UpsertARP(host.VtepOverlayIP, host.VtepOverlayMAC)
 		if err != nil {
 			return fmt.Errorf("set l3: %s", err)
 		}
-		err = c.Device.SetL2(l2neigh)
+		err = c.device.UpsertFDB(host.VtepOverlayMAC, host.PublicIP)
 		if err != nil {
 			return fmt.Errorf("set l2: %s", err)
 		}
-		err = c.Device.AddRoute(
-			&host.OverlaySubnet, host.OverlaySubnet.IP, netlink.SCOPE_UNIVERSE, c.LocalConfig.VtepOverlayIP)
+		err = c.device.AddRoute(
+			&host.OverlaySubnet, host.OverlaySubnet.IP,
+			netlink.SCOPE_UNIVERSE, c.localVtepOverlayIP,
+		)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (c *vtep) Teardown() error {
+	return c.deleteDependentLinks()
+}
+
+func (c *vtep) FullNetwork() net.IPNet {
+	return c.fullNetwork
+}
+
+func (c *vtep) LocalSubnet() net.IPNet {
+	return c.localSubnet
+}
+
+func (c *vtep) OverlayMTU() int {
+	return c.device.MTU()
+}
+
+func (c *vtep) deleteDependentLinks() error {
+	var result error
+	for _, linkName := range c.dependentLinks {
+		if err := removeLinkByName(linkName); err != nil {
+			result = multierror.Append(result, err)
+		}
+	}
+	return result
 }

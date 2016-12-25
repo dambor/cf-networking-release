@@ -11,6 +11,7 @@ export GOPATH=$BOSH_INSTALL_TARGET
 export PATH=$GOROOT/bin:$GOPATH/bin:$PATH
 
 go install silk
+go install cni-wrapper-plugin
 go install github.com/containernetworking/cni/plugins/main/bridge
 go install github.com/containernetworking/cni/plugins/ipam/host-local
 go install github.com/containernetworking/cni/plugins/meta/flannel

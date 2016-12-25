@@ -5,6 +5,8 @@ dependencies:
   - golang
 
 files:
+  - cni-wrapper-plugin/*.go # gosub
+  - cni-wrapper-plugin/lib/*.go # gosub
   - code.cloudfoundry.org/lager/*.go # gosub
   - github.com/containernetworking/cni/pkg/invoke/*.go # gosub
   - github.com/containernetworking/cni/pkg/ip/*.go # gosub
@@ -26,16 +28,27 @@ files:
   - github.com/containernetworking/cni/vendor/github.com/vishvananda/netns/*.go # gosub
   - github.com/containernetworking/cni/vendor/golang.org/x/sys/unix/*.go # gosub
   - github.com/containernetworking/cni/vendor/golang.org/x/sys/unix/*.s # gosub
+  - github.com/coreos/go-iptables/iptables/*.go # gosub
+  - github.com/hashicorp/go-multierror/*.go # gosub
+  - github.com/hashicorp/go-multierror/vendor/github.com/hashicorp/errwrap/*.go # gosub
   - github.com/tedsuo/ifrit/*.go # gosub
   - github.com/tedsuo/ifrit/grouper/*.go # gosub
   - github.com/tedsuo/ifrit/sigmon/*.go # gosub
   - github.com/vishvananda/netlink/*.go # gosub
   - github.com/vishvananda/netlink/nl/*.go # gosub
   - github.com/vishvananda/netns/*.go # gosub
+  - lib/datastore/*.go # gosub
+  - lib/filelock/*.go # gosub
   - lib/flannel/*.go # gosub
+  - lib/marshal/*.go # gosub
+  - lib/models/*.go # gosub
+  - lib/policy_client/*.go # gosub
+  - lib/rules/*.go # gosub
+  - lib/serial/*.go # gosub
   - silk/*.go # gosub
+  - silk-controller/client/*.go # gosub
+  - silk-controller/models/*.go # gosub
   - silk/backend/*.go # gosub
   - silk/config/*.go # gosub
-  - silk/hwaddr/*.go # gosub
-  - silk/models/*.go # gosub
+  - silk/converge/*.go # gosub
   - silk/subnet/*.go # gosub

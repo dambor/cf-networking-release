@@ -1,9 +1,19 @@
 {
-  "name": "silk",
-  "type": "flannel",
+  "name": "cni-wrapper",
+  "type": "cni-wrapper-plugin",
+  "cniVersion": "0.2.0",
+  "datastore": "<%= p('cni_datastore_path') %>",
+  "iptables_lock_file": "<%= p('cni_iptables_lock_file') %>",
+  "overlay_network": "<%= link("silk-controller").p('network') %>",
   "delegate": {
-    "bridge": "cni-silk0",
-    "isDefaultGateway": true,
-    "ipMasq": false
-   }
+    "name": "silk",
+    "type": "flannel",
+    "subnetFile": "<%= p('flannel_subnet_file') %>",
+    "dataDir": "<%= p('flannel_data_dir') %>",
+    "delegate": {
+      "bridge": "cni-flannel0",
+      "isDefaultGateway": true,
+      "ipMasq": false
+     }
+  }
 }

@@ -2,21 +2,20 @@
 
 require 'json'
 
-def get_hosts()
-  hosts = []
-  link("peers").instances.map do |instance|
-    hosts.push({
-      "index" => instance.index,
-      "public_ip" => instance.address,
-    })
-  end
-  hosts
-end
+controller = link("silk-controller")
 
+conf = {}
+conf["network"] = controller.p("network")
+conf["vni"] = controller.p("vni")
+conf["vtep_port"] = p("vtep_port")
+conf["vtep_ip"] = spec.address
+conf["poll_interval"] = p("poll_interval")
+conf["flannel_subnet_file"] = p("flannel_subnet_file")
 
-conf = p("silk")
-conf["this_index"] = spec.index
-conf["hosts"] = get_hosts()
+conf["controller"] = {
+  "host" => controller.instances.first.address,
+  "port" => controller.p("listen_port").to_i,
+}
 
 JSON.pretty_generate(conf)
 

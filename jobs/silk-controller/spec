@@ -1,0 +1,29 @@
+---
+name: silk-controller
+
+templates:
+  silk-controller_ctl.erb: bin/silk-controller_ctl
+
+provides:
+- name: silk-controller
+  type: silk-controller
+  properties:
+  - listen_port
+  - network
+  - vni
+
+packages:
+- silk-controller
+
+properties:
+  listen_port:
+    description: "Listen port for HTTP access to controller"
+    default: "5000"
+
+  network:
+    description: "CIDR block for overlay network.  Should be /16"
+    default: "10.255.0.0/16"
+
+  vni:
+    description: "VXLAN Virtual Network Identifier for the overlay network"
+    default: 1

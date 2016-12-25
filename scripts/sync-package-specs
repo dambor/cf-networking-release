@@ -67,9 +67,13 @@ GOOS=linux sync_package flannel \
 
 GOOS=linux sync_package silk \
   -app silk \
+  -app cni-wrapper-plugin \
   -app github.com/containernetworking/cni/plugins/main/bridge \
   -app github.com/containernetworking/cni/plugins/ipam/host-local \
   -app github.com/containernetworking/cni/plugins/meta/flannel &
+
+sync_package silk-controller \
+  -app silk-controller &
 
 wait
 
