@@ -10,11 +10,6 @@ import (
 	"code.cloudfoundry.org/lager"
 )
 
-//go:generate counterfeiter -o fakes/policy_filter.go --fake-name PolicyFilter . policyFilter
-type policyFilter interface {
-	FilterPolicies(policies []models.Policy, userToken uaa_client.CheckTokenResponse) ([]models.Policy, error)
-}
-
 type PoliciesIndex struct {
 	Logger       lager.Logger
 	Store        store

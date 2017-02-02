@@ -6,11 +6,6 @@ import (
 	"policy-server/models"
 )
 
-//go:generate counterfeiter -o fakes/validator.go --fake-name Validator . validator
-type validator interface {
-	ValidatePolicies(policies []models.Policy) error
-}
-
 type Validator struct{}
 
 func (v *Validator) ValidatePolicies(policies []models.Policy) error {

@@ -11,11 +11,6 @@ import (
 	"code.cloudfoundry.org/lager"
 )
 
-//go:generate counterfeiter -o fakes/policy_guard.go --fake-name PolicyGuard . policyGuard
-type policyGuard interface {
-	CheckAccess(policies []models.Policy, tokenData uaa_client.CheckTokenResponse) (bool, error)
-}
-
 type PoliciesCreate struct {
 	Logger      lager.Logger
 	Store       store

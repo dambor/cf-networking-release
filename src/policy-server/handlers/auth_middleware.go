@@ -4,30 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"policy-server/uaa_client"
 	"strings"
 
 	"code.cloudfoundry.org/lager"
 )
 
-//go:generate counterfeiter -o fakes/http_handler.go --fake-name HTTPHandler . http_handler
-type http_handler interface {
-	http.Handler
-}
-
-type UAAClient interface {
-	CheckToken(token string) (uaa_client.CheckTokenResponse, error)
-}
-
 type Authenticator struct {
-	Client UAAClient
+	Client uaaClient
 	Logger lager.Logger
 	Scopes []string
-}
-
-//go:generate counterfeiter -o fakes/authenticated_handler.go --fake-name AuthenticatedHandler . authenticatedHandler
-type authenticatedHandler interface {
-	ServeHTTP(response http.ResponseWriter, request *http.Request, tokenData uaa_client.CheckTokenResponse)
 }
 
 func (a *Authenticator) Wrap(handle authenticatedHandler) http.Handler {

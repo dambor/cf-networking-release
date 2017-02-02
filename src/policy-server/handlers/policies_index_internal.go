@@ -9,14 +9,6 @@ import (
 	"code.cloudfoundry.org/lager"
 )
 
-//go:generate counterfeiter -o fakes/store.go --fake-name Store . store
-type store interface {
-	All() ([]models.Policy, error)
-	Create([]models.Policy) error
-	Delete([]models.Policy) error
-	Tags() ([]models.Tag, error)
-}
-
 type PoliciesIndexInternal struct {
 	Logger    lager.Logger
 	Store     store
