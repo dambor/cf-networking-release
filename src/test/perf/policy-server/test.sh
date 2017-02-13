@@ -7,6 +7,8 @@ export API="https://api.bosh-lite.com"
 export CF_USER=admin
 export CF_PASSWORD=admin
 
+CF_HOME=~/.cf cf api "$API" --skip-ssl-validation
+
 cd $GOPATH
 
 go run src/test/perf/policy-server/main.go \
@@ -17,5 +19,5 @@ go run src/test/perf/policy-server/main.go \
 	-cfUser "$CF_USER" \
 	-cfPassword "$CF_PASSWORD" \
 	-api "$API" \
-	-setup=false
+	-setup=true
 	

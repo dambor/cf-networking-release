@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"lib/models"
 	"lib/policy_client"
 	"log"
@@ -12,15 +13,18 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
+	"os/user"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"code.cloudfoundry.org/lager"
 )
 
-func refreshToken(logger lager.Logger, cfUser, cfPassword string) error {
-	// cf auth
+func refreshToken(logger lager.Logger, cfUser, cfPassword, cfHomeDir string) error {
 	cmd := exec.Command("cf", "auth", cfUser, cfPassword)
+	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, fmt.Sprintf("CF_HOME=%s", cfHomeDir))
 
 	outputBytes, err := cmd.Output()
 	if err != nil {
@@ -41,9 +45,10 @@ func refreshToken(logger lager.Logger, cfUser, cfPassword string) error {
 	return nil
 }
 
-func getCurrentToken(logger lager.Logger) (string, error) {
-	// cf oauth-token
+func getCurrentToken(logger lager.Logger, cfHomeDir string) (string, error) {
 	cmd := exec.Command("cf", "oauth-token")
+	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, fmt.Sprintf("CF_HOME=%s", cfHomeDir))
 
 	tokenBytes, err := cmd.Output()
 	if err != nil {
@@ -112,7 +117,6 @@ func main() {
 
 	refreshTokenTime := 5 * time.Minute
 
-	// Initialize policy client
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
@@ -120,19 +124,46 @@ func main() {
 			},
 		},
 	}
+
+	user, err := user.Current()
+	if err != nil {
+		logger.Error("get-home-dir-failed", err)
+	}
+	homeDir := user.HomeDir
+	if _, err = os.Stat(filepath.Join(homeDir, ".cf")); os.IsNotExist(err) {
+		logger.Error("cf-dir-unavailable", err)
+		panic("cf-dir-unavailable")
+	}
+
+	defaultCfDir := filepath.Join(homeDir, ".cf")
+
+	// Create temp cf home dirs for each cell, with config copied from ~/.cf
+	cfDirs := make([]string, numCells, numCells)
+	for i := 0; i < numCells; i++ {
+		cfDir, err := ioutil.TempDir("", "cfhome")
+		if err != nil {
+			logger.Error("init-temp-cf-home-dir-failed", err)
+		}
+		cfDirs[i] = cfDir
+
+		cmd := exec.Command("cp", "-r", filepath.Join(homeDir, ".cf"), filepath.Join(cfDir, ".cf"))
+		err = cmd.Run()
+		if err != nil {
+			logger.Error("copy-cf-config-failed", err)
+		}
+	}
+
 	client := policy_client.NewExternal(logger, httpClient, policyServerAPI)
 
-	// Get token
-	err := refreshToken(logger, cfUser, cfPassword)
+	err = refreshToken(logger, cfUser, cfPassword, defaultCfDir)
 	if err != nil {
 		logger.Fatal("Unable to refresh token", err)
 	}
-	token, err := getCurrentToken(logger)
+	token, err := getCurrentToken(logger, defaultCfDir)
 	if err != nil {
 		logger.Fatal("Unable to get token", err)
 	}
 
-	// Purge existing policies
 	if setup {
 		logger.Info("getting-existing-policies")
 		policies, err := client.GetPolicies(token)
@@ -140,6 +171,7 @@ func main() {
 		if err != nil {
 			logger.Fatal("Failed to get policies", err)
 		}
+
 		logger.Info("deleting-existing-policies")
 		err = client.DeletePolicies(token, policies)
 		if err != nil {
@@ -185,11 +217,11 @@ func main() {
 		logger.Info("done-creating-policies")
 
 		// Get token
-		err = refreshToken(logger, cfUser, cfPassword)
+		err = refreshToken(logger, cfUser, cfPassword, defaultCfDir)
 		if err != nil {
 			logger.Fatal("Unable to refresh token", err)
 		}
-		token, err = getCurrentToken(logger)
+		token, err = getCurrentToken(logger, defaultCfDir)
 		if err != nil {
 			logger.Fatal("Unable to get token", err)
 		}
@@ -217,18 +249,31 @@ func main() {
 
 	pollPolicyServer := func(ids []string, index int) {
 		numCalls := 0
-		token, err := getCurrentToken(logger)
+		// refresh token
+		lastTokenRefresh := time.Now()
+		err := refreshToken(logger, cfUser, cfPassword, cfDirs[index])
+		if err != nil {
+			logger.Fatal("Unable to refresh token", err)
+		}
+		token, err := getCurrentToken(logger, cfDirs[index])
 		if err != nil {
 			logger.Fatal("Unable to get token", err)
 		}
 		for {
 			select {
-			case <-time.After(refreshTokenTime):
-				token, err = getCurrentToken(logger)
-				if err != nil {
-					logger.Fatal("Unable to get token", err)
-				}
 			case <-time.After(pollInterval): // TODO jitter?
+				if time.Now().Sub(lastTokenRefresh) > refreshTokenTime {
+					// refresh token
+					lastTokenRefresh = time.Now()
+					err := refreshToken(logger, cfUser, cfPassword, cfDirs[index])
+					if err != nil {
+						logger.Fatal("Unable to refresh token", err)
+					}
+					token, err = getCurrentToken(logger, cfDirs[index])
+					if err != nil {
+						logger.Fatal("Unable to get token", err)
+					}
+				}
 				go callPolicyServer(ids, index, numCalls, token)
 				numCalls = numCalls + 1
 				continue
@@ -236,21 +281,10 @@ func main() {
 		}
 	}
 
-	// Refresh token every five minutes
-	go func() {
-		logger.Info("starting-refresh-token-job")
-		for {
-			select {
-			case <-time.After(refreshTokenTime):
-				refreshToken(logger, cfUser, cfPassword)
-			}
-		}
-	}()
-
 	// each "cell" makes requests to server for its app instances
 	for i := 0; i < len(cells); i++ {
 		go func(i int) {
-			logger.Info(fmt.Sprintf("starting-from-cell-%d", i))
+			logger.Info(fmt.Sprintf("cell-%d-polling-server", i))
 			pollPolicyServer(cells[i], i)
 		}(i)
 	}
