@@ -11,10 +11,51 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"code.cloudfoundry.org/lager"
 )
+
+func refreshToken(logger lager.Logger, cfUser, cfPassword string) error {
+	// cf auth
+	cmd := exec.Command("cf", "auth", cfUser, cfPassword)
+
+	outputBytes, err := cmd.Output()
+	if err != nil {
+		logger.Error("failed-to-run-cf-auth", err)
+		return err
+	}
+
+	output := string(outputBytes)
+
+	if strings.Contains(output, "FAILED") {
+		logger.Error("Failed to authenticate", nil, lager.Data{
+			"cfUser":     cfUser,
+			"cfPassword": cfPassword,
+		})
+		return errors.New("failed to authenticate")
+	}
+
+	return nil
+}
+
+func getCurrentToken(logger lager.Logger) (string, error) {
+	// cf oauth-token
+	cmd := exec.Command("cf", "oauth-token")
+
+	tokenBytes, err := cmd.Output()
+	if err != nil {
+		logger.Error("failed-to-run-cf-oauth-token", err)
+		return "", err
+	}
+
+	token := string(tokenBytes[0 : len(tokenBytes)-1]) // remove trailing \n
+	logger.Info("got-token", lager.Data{"token": token})
+
+	return token, nil
+}
 
 func main() {
 	// Our GA scalability target is: 100 cells, 100 apps and 200 instances per app with 3 policies per app.
@@ -49,17 +90,18 @@ func main() {
 
 	// Parse flags
 	var (
-		apps, numCells, policiesPerApp int
-		pollInterval                   time.Duration
-		token, policyServerAPI         string
-		setup                          bool
+		apps, numCells, policiesPerApp      int
+		pollInterval                        time.Duration
+		policyServerAPI, cfUser, cfPassword string
+		setup                               bool
 	)
 	flag.IntVar(&apps, "apps", 10000, "number of apps")
 	flag.IntVar(&numCells, "numCells", 100, "number of cells")
 	// TODO app instances
 	flag.IntVar(&policiesPerApp, "policiesPerApp", 3, "policies per app")
 	flag.DurationVar(&pollInterval, "pollInterval", 5*time.Second, "polling interval on each cell")
-	flag.StringVar(&token, "token", "", "OAuth for policy server")
+	flag.StringVar(&cfUser, "cfUser", "", "cf user")
+	flag.StringVar(&cfPassword, "cfPassword", "", "cf password for cf user")
 	flag.StringVar(&policyServerAPI, "api", "", "policy server base URL")
 	flag.BoolVar(&setup, "setup", true, "if true, remove existing policies and create new policies")
 	flag.Parse()
@@ -67,6 +109,8 @@ func main() {
 	if policyServerAPI == "" {
 		logger.Fatal("Specify policy server", errors.New(""))
 	}
+
+	refreshTokenTime := 5 * time.Minute
 
 	// Initialize policy client
 	httpClient := &http.Client{
@@ -77,6 +121,16 @@ func main() {
 		},
 	}
 	client := policy_client.NewExternal(logger, httpClient, policyServerAPI)
+
+	// Get token
+	err := refreshToken(logger, cfUser, cfPassword)
+	if err != nil {
+		logger.Fatal("Unable to refresh token", err)
+	}
+	token, err := getCurrentToken(logger)
+	if err != nil {
+		logger.Fatal("Unable to get token", err)
+	}
 
 	// Purge existing policies
 	if setup {
@@ -129,6 +183,17 @@ func main() {
 			logger.Fatal("Failed to create policies", err)
 		}
 		logger.Info("done-creating-policies")
+
+		// Get token
+		err = refreshToken(logger, cfUser, cfPassword)
+		if err != nil {
+			logger.Fatal("Unable to refresh token", err)
+		}
+		token, err = getCurrentToken(logger)
+		if err != nil {
+			logger.Fatal("Unable to get token", err)
+		}
+
 	} else {
 		logger.Info("skipping-creating-policies")
 	}
@@ -141,7 +206,7 @@ func main() {
 	}
 
 	// each "cell" is its own goroutine which spawns goroutines to make requests
-	callPolicyServer := func(ids []string, index, numCalls int) {
+	callPolicyServer := func(ids []string, index, numCalls int, token string) {
 		_, err := client.GetPoliciesByID(token, ids...)
 		if err != nil {
 			logger.Error("failed-to-get-policies", err)
@@ -152,17 +217,37 @@ func main() {
 
 	pollPolicyServer := func(ids []string, index int) {
 		numCalls := 0
+		token, err := getCurrentToken(logger)
+		if err != nil {
+			logger.Fatal("Unable to get token", err)
+		}
 		for {
 			select {
+			case <-time.After(refreshTokenTime):
+				token, err = getCurrentToken(logger)
+				if err != nil {
+					logger.Fatal("Unable to get token", err)
+				}
 			case <-time.After(pollInterval): // TODO jitter?
-				go callPolicyServer(ids, index, numCalls)
+				go callPolicyServer(ids, index, numCalls, token)
 				numCalls = numCalls + 1
 				continue
 			}
 		}
 	}
 
-	// each "cell" makes requests to server for it's app instances
+	// Refresh token every five minutes
+	go func() {
+		logger.Info("starting-refresh-token-job")
+		for {
+			select {
+			case <-time.After(refreshTokenTime):
+				refreshToken(logger, cfUser, cfPassword)
+			}
+		}
+	}()
+
+	// each "cell" makes requests to server for its app instances
 	for i := 0; i < len(cells); i++ {
 		go func(i int) {
 			logger.Info(fmt.Sprintf("starting-from-cell-%d", i))
