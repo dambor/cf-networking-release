@@ -3,7 +3,7 @@
 set -e -u
 set -o pipefail
 
-export API="https://api.bosh-lite.com"
+export API="api.bosh-lite.com"
 export CF_USER=admin
 export CF_PASSWORD=admin
 
@@ -12,12 +12,14 @@ CF_HOME=~/.cf cf api "$API" --skip-ssl-validation
 cd $GOPATH
 
 go run src/test/perf/policy-server/main.go \
-	-apps 10 \
-	-numCells 1 \
+	-apps 1000 \
+	-numCells 50 \
 	-policiesPerApp 3 \
-	-pollInterval 5s \
+	-pollInterval 30s \
 	-cfUser "$CF_USER" \
 	-cfPassword "$CF_PASSWORD" \
 	-api "$API" \
-	-setup=true
+  -out "/tmp/out.$(date +%s).txt" \
+  -expiration 5m \
+  -setup=false
 	

@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"lib/models"
 	"lib/policy_client"
-	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -82,23 +81,14 @@ func main() {
 	// before test run:
 	// clean up policies
 	// if necessary, disable cleanup (restart server with long cleanup polling interval)
-	//
-	// setup
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
 
 	logger := lager.NewLogger("container-networking.policy-server-test")
-	logger.RegisterSink(lager.NewWriterSink(os.Stdout, lager.INFO))
-	logger.Info("started")
-	defer logger.Info("exited")
 
-	// Parse flags
 	var (
-		apps, numCells, policiesPerApp      int
-		pollInterval                        time.Duration
-		policyServerAPI, cfUser, cfPassword string
-		setup                               bool
+		apps, numCells, policiesPerApp           int
+		pollInterval, expiration                 time.Duration
+		policyServerAPI, cfUser, cfPassword, out string
+		setup                                    bool
 	)
 	flag.IntVar(&apps, "apps", 10000, "number of apps")
 	flag.IntVar(&numCells, "numCells", 100, "number of cells")
@@ -109,7 +99,18 @@ func main() {
 	flag.StringVar(&cfPassword, "cfPassword", "", "cf password for cf user")
 	flag.StringVar(&policyServerAPI, "api", "", "policy server base URL")
 	flag.BoolVar(&setup, "setup", true, "if true, remove existing policies and create new policies")
+	flag.StringVar(&out, "out", "out.txt", "lager stdout")
+	flag.DurationVar(&expiration, "expiration", time.Hour, "length of polling")
 	flag.Parse()
+
+	// Write to file
+	file, err := os.OpenFile(out, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		logger.Fatal("unable-to-write-to-file", err)
+	}
+	logger.RegisterSink(lager.NewWriterSink(file, lager.INFO))
+	logger.Info("started")
+	defer logger.Info("exited")
 
 	if policyServerAPI == "" {
 		logger.Fatal("Specify policy server", errors.New(""))
@@ -152,28 +153,29 @@ func main() {
 			logger.Error("copy-cf-config-failed", err)
 		}
 	}
-
-	client := policy_client.NewExternal(logger, httpClient, policyServerAPI)
+	logger.Info("cfDirs", lager.Data{"cfDirs": cfDirs})
 
 	err = refreshToken(logger, cfUser, cfPassword, defaultCfDir)
 	if err != nil {
 		logger.Fatal("Unable to refresh token", err)
 	}
-	token, err := getCurrentToken(logger, defaultCfDir)
+	homeToken, err := getCurrentToken(logger, defaultCfDir)
 	if err != nil {
 		logger.Fatal("Unable to get token", err)
 	}
 
+	client := policy_client.NewExternal(logger, httpClient, policyServerAPI)
+
 	if setup {
 		logger.Info("getting-existing-policies")
-		policies, err := client.GetPolicies(token)
+		policies, err := client.GetPolicies(homeToken)
 		logger.Info("existing-policies", lager.Data{"num-existing-policies": len(policies)})
 		if err != nil {
 			logger.Fatal("Failed to get policies", err)
 		}
 
 		logger.Info("deleting-existing-policies")
-		err = client.DeletePolicies(token, policies)
+		err = client.DeletePolicies(homeToken, policies)
 		if err != nil {
 			logger.Fatal("Failed to delete policies", err)
 		}
@@ -210,18 +212,17 @@ func main() {
 				policies = append(policies, policy)
 			}
 		}
-		err := client.AddPolicies(token, policies)
+		err := client.AddPolicies(homeToken, policies)
 		if err != nil {
 			logger.Fatal("Failed to create policies", err)
 		}
 		logger.Info("done-creating-policies")
 
-		// Get token
 		err = refreshToken(logger, cfUser, cfPassword, defaultCfDir)
 		if err != nil {
 			logger.Fatal("Unable to refresh token", err)
 		}
-		token, err = getCurrentToken(logger, defaultCfDir)
+		homeToken, err = getCurrentToken(logger, defaultCfDir)
 		if err != nil {
 			logger.Fatal("Unable to get token", err)
 		}
@@ -239,6 +240,11 @@ func main() {
 
 	// each "cell" is its own goroutine which spawns goroutines to make requests
 	callPolicyServer := func(ids []string, index, numCalls int, token string) {
+		logger.Info("callPolicyServer", lager.Data{
+			"index":    index,
+			"numCalls": numCalls,
+			"token":    token,
+		})
 		_, err := client.GetPoliciesByID(token, ids...)
 		if err != nil {
 			logger.Error("failed-to-get-policies", err)
@@ -248,9 +254,6 @@ func main() {
 	}
 
 	pollPolicyServer := func(ids []string, index int) {
-		numCalls := 0
-		// refresh token
-		lastTokenRefresh := time.Now()
 		err := refreshToken(logger, cfUser, cfPassword, cfDirs[index])
 		if err != nil {
 			logger.Fatal("Unable to refresh token", err)
@@ -259,6 +262,9 @@ func main() {
 		if err != nil {
 			logger.Fatal("Unable to get token", err)
 		}
+
+		numCalls := 0
+		lastTokenRefresh := time.Now()
 		for {
 			select {
 			case <-time.After(pollInterval): // TODO jitter?
@@ -290,7 +296,8 @@ func main() {
 	}
 
 	fmt.Println("Press CTRL-C to exit")
-	for {
-		time.Sleep(10 * time.Second)
+	select {
+	case <-time.After(expiration):
+		os.Exit(0)
 	}
 }
